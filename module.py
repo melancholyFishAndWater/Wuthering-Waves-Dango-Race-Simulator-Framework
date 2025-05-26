@@ -1,8 +1,6 @@
-from ast import Dict
-from os import name
-from pdb import run
+from calendar import day_abbr
+from math import log
 import re
-from tkinter import N, NO
 from globals import *
 
 class EventTrigger(Enum):
@@ -70,6 +68,7 @@ class Skill:
         Returns:
             bool: 是否满足
         """
+        logger.debug(f"进行技能判定 {self}")
         condition = self._condition
         match condition:
             case _ if isinstance(condition, bool):
@@ -136,6 +135,7 @@ class Skill:
             data (EventData): 本局数据
         """
         logger.info(f"技能【{self.__name}】发动{"：" + self.__describe if self.__describe != "" else ""}")
+        self.__effect_times += 1
         effect = self._effect
         match effect:
             case _ if isinstance(effect, int):
@@ -235,9 +235,18 @@ class Skill:
     def describe(self) -> str:
         return self.__describe
 
+# 其他
+    def effectTimes(self) -> int:
+        """
+        返回技能生效次数
+
+        Returns:
+            int: 生效次数
+        """
+        return self.__effect_times
+
     def copy(self) -> "Skill":
         return copy.copy(self)
-
     def deepcopy(self) -> "Skill":
         return copy.deepcopy(self)
 
@@ -287,6 +296,7 @@ class Skill:
         self.__describe = describe
         self._owner : "Role | None" = None
         self.__name_format: str | None = None
+        self.__effect_times: int = 0
 
 class Role:
 
@@ -524,17 +534,18 @@ class Role:
         result = self.findAllHeadRole()
         for role in result:
             role.move2(num)
-    def move(self, num : int):
+    def move(self, num : int, roles: list["Role"]):
         """
-        移动，会连带移动头顶的角色
+        移动，会连带移动头顶的角色，会删除原本底部角色然后设置新底部角色
 
         Args:
             num (int): 移动数量
+            roles (list[Role]): 剩余角色列表
         """
         logger.info(f"{self._name}移动{num}格")
         self.__cell += num
+        self.findAndSetBottomRole(roles)
         self.tryHeadRoleMove(num)
-        self.tryRemoveBottomRole()
     def move2(self, num : int):
         """
         特殊移动。只移动自己，不会删除底部的角色，不会移动头上角色
@@ -591,15 +602,32 @@ class Role:
             role = role._head
             l.append(role)
         return l
+    def findAllHeadRoleOfName(self) -> list[str]:
+        """
+        输出在角色头顶的角色名字列表
 
-    def findTopRole(self) -> "Role":
+        Returns:
+            list[str]: 名字列表
+        """
+        l: list[str] = []
+        role = self
+        while(role._head is not None):
+            role = role._head
+            l.append(role.name())
+        return l
+
+    def findTopRole(self) -> "Role | None":
         """
         找到角色最顶端的角色
 
         Returns:
-            Role: 最顶端的角色
+            Role | None: 最顶端的角色
         """
-        return self.findAllHeadRole()[-1]
+        l = self.findAllHeadRole()
+        if l == []:
+            return None
+        else:
+            return l[-1]
 
 # 的修改
     def setStack(self, role : "Role"):
@@ -611,6 +639,14 @@ class Role:
         """
         self.setBottomRole(role)
 
+    def headRole(self) -> "Role | None":
+        """
+        获取头上的角色
+
+        Returns:
+            Role | None: 头上的角色
+        """
+        return self._head
     def setHeadRole(self, role : "Role"):
         """
         设置自己头顶角色
@@ -620,26 +656,24 @@ class Role:
         Args:
             role (Role): 角色
         """
-        logger.debug(f"{self._name}设置头顶角色为{role._name}")
-        logger.debug(f"{role._name}设置底部角色为{self._name}")
+        self.removeHeadRole()       # TODO 可优化
+        logger.debug(f"{self}设置头顶角色为{role}")
         self._head = role
+        logger.debug(f"{role}设置底部角色为{self}")
         role._bottom = self
-    def headRole(self) -> "Role | None":
-        """
-        获取头上的角色
-
-        Returns:
-            Role | None: 头上的角色
-        """
-        return self._head
     def removeHeadRole(self):
         """
         尝试删除角色上面的角色
         """
         if self._head is not None:
+            logger.debug(f"{self._head}移除底部角色{self._head._bottom}")
             self._head._bottom = None
+            logger.debug(f"{self}移除头顶角色{self._head}")
             self._head = None
+
     
+    def bottomRole(self) -> "Role | None":
+        return self._bottom
     def setBottomRole(self, role : "Role"):
         """
         设置自己底部角色
@@ -649,19 +683,40 @@ class Role:
         Args:
             role (Role): 角色
         """
-        logger.debug(f"{self._name}设置底部角色为{role._name}")
-        logger.debug(f"{role._name}设置头顶角色为{self._name}")
+        self.removeBottomRole()     # TODO 可以优化
+        logger.debug(f"{self}设置底部角色为{role}")
         self._bottom = role
+        logger.debug(f"{role}设置头顶角色为{self}")
         role._head = self
-    def bottomRole(self) -> "Role | None":
-        return self._bottom
-    def tryRemoveBottomRole(self):
+    def removeBottomRole(self):
         """
         删除角色下面的角色
         """
         if self._bottom is not None:
+            logger.debug(f"{self._bottom}移除头顶角色{self._bottom._head}")
             self._bottom._head = None
+            logger.debug(f"{self}移除底部角色{self._bottom}")
             self._bottom = None
+    def findAndSetBottomRole(self, roles: list["Role"]):
+        """
+        从角色列表中找到第一个和自己在同一格的其他角色，
+        然后将此角色设置为自身的底部角色
+        
+        如果没找到，则尝试删除自身底部角色
+
+        Args:
+            roles (list[Role]): 角色列表
+        """
+        same_cell_role = None
+        for role in roles:
+            if (role is not self) and (self.inSameCell(role)):
+                same_cell_role = role
+                break
+        
+        if same_cell_role is None:
+            self.removeBottomRole()
+        else:
+            self.setBottomRole(same_cell_role)
     
 # 角色名
     def name(self):
@@ -799,14 +854,6 @@ class EventData(RoleData):
         else:
             raise TypeError("role类型错误，请检查类型")
 
-    # def resetAllRoles(self):
-    #     """
-    #     重置所有角色的数据
-        
-    #     包括：角色
-    #     """
-    #     pass
-
 # 对局情况
     def isEnd(self) -> bool:
         """
@@ -816,6 +863,22 @@ class EventData(RoleData):
             bool: 是否结束
         """
         return len(self._roles) <= 0
+    def now(self) -> EventTrigger:
+        """
+        获取当前事件的时机
+
+        Returns:
+            EventEnum: 事件时机
+        """
+        return self.__now
+    def setNow(self, trigger: EventTrigger):
+        """
+        设置当前事件时点
+
+        Args:
+            tri (EventEnum): 时间时机
+        """
+        self.__now = trigger
 
 # 排名
     def setRoleInEndpoint(self, role: Role):
@@ -860,6 +923,14 @@ class EventData(RoleData):
             Role: 下一个移动角色
         """
         return self.moveOrder()[len(self.movedRoles())]
+    def newMoveOrder(self):
+        """
+        快速生成一个随机移动顺序，存于自身
+        """
+        roles = self.roles()
+        self.setMoveOrder(
+            random.sample(roles, len(roles))
+            )
 
 # 移动过
     def movedRoles(self) -> list[Role]:
@@ -896,7 +967,7 @@ class EventData(RoleData):
         """
         logger.debug("清空移动过的角色列表")
         self.__movedRoles.clear()
-    def allMoved(self) -> bool:
+    def isAllMoved(self) -> bool:
         """
         返回角色是否全部移动过
 
@@ -955,9 +1026,36 @@ class EventData(RoleData):
         """
         self.__length = length
 
+# 调试
+    def setMoveOrderOfSeq(self, role1_seq: int, role2_seq: int):
+        """
+        将 role1_seq和role2_seq 的移动顺序交换
+
+        Args:
+            role1_seq (int): 角色1的序号
+            role2_seq (int): 角色2的序号
+        """
+        move_order = self.moveOrder()
+        role1 = move_order[role1_seq]
+        move_order[role1_seq] = move_order[role2_seq]
+        move_order[role2_seq] = role1
+        self.setMoveOrder(move_order)
+        return move_order
+    def getAllLinkState(self) -> list[str]:
+        """
+        返回场上所有角色链接状态
+
+        Returns:
+            list[str]: 链接状态列表
+        """
+        result = []
+        for role in self.roles():
+            l = [role.name()] + role.findAllHeadRoleOfName()
+            result.append(" --> ".join(l))
+        return result
+
     def copy(self) -> "EventData":
         return copy.copy(self)
-
     def deepcopy(self) -> "EventData":
         return copy.deepcopy(self)
 
@@ -971,31 +1069,14 @@ class EventData(RoleData):
         self.__movedRoles: list[Role] = []      # 移动过的角色
         self.__moveNum: int = 0                 # 移动格数
         self.__nowRole: Role | None = None      # 当前处理角色
-        self.__length: int | None = None                 # 赛道长度
+        self.__length: int | None = None        # 赛道长度
         self.__rankingOfRoles: dict[Role, int] = {}
+        self.__now = EventTrigger.unStart       #当前时机
 
 class EventProcessor:
     """
-    游戏事件
+    游戏事件处理器
     """
-
-# 时机  # TODO 应该分出去的
-    def now(self) -> EventTrigger:
-        """
-        获取当前事件的时机
-
-        Returns:
-            EventEnum: 事件时机
-        """
-        return self.__now
-    def setNow(self, tri: EventTrigger):
-        """
-        设置当前事件时点
-
-        Args:
-            tri (EventEnum): 时点
-        """
-        self.__now = tri
 
 # 数据
     def setInitData(self, data: EventData):
@@ -1043,6 +1124,9 @@ class EventProcessor:
         return role
     
     def gameStartInit(self):
+        """
+        初始化游戏开始数据
+        """
         logger.debug("进行数据初始化")
         init_data = self.initData2()
         self.__data = init_data.deepcopy()
@@ -1060,8 +1144,17 @@ class EventProcessor:
             dict[str, int]: 字典，key为角色名，int为排名
         """
         return {role.name(): num for role, num in result.items()}
-
     def resultsToProbability(self, result: dict[str, dict[int, int]], times: int) -> dict[str, dict[int, str]]:
+        """
+        将角色排名次数转换成百分比
+
+        Args:
+            result (dict[str, dict[int, int]]): runs结果
+            times (int): runs次数
+
+        Returns:
+            dict[str, dict[int, str]]: 角色对应排名概率
+        """
         final_return: dict[str, dict[int, str]] = {}
         
         for name in result:
@@ -1071,8 +1164,7 @@ class EventProcessor:
         
         return final_return
                 
-# 其他处理
-
+# 检测技能
     def checkTrigger(self):
         """
         尝试使用所有角色的技能
@@ -1083,7 +1175,7 @@ class EventProcessor:
         roles = data.roles()
         
         for role in roles:
-            role.tryUseSkills(self.now(), data)
+            role.tryUseSkills(data.now(), data)
     def checkTrigger2(self):
         """
         同上，但是这是专门在turnStart时，也就是没有当前处理角色时使用的函数
@@ -1095,31 +1187,22 @@ class EventProcessor:
         roles = data.roles()
         
         for role in roles:
-            role.tryUseSkills2(self.now(), data)
-
-    def newMoveOrder(self):
-        """
-        快速生成一个随机移动顺序并存于数据类中
-        """
-        data = self.data()
-        roles = data.roles()
-        data.setMoveOrder(
-            random.sample(roles, len(roles))
-            )
+            role.tryUseSkills2(data.now(), data)
 
 # 主逻辑
     def gameStart(self) -> bool:
-        self.setNow(EventTrigger.gameStart)
         logger.info("游戏开始")
-        logger.debug("载入角色")
+        logger.debug("初始化数据")
         self.gameStartInit()
+        self.data().setNow(EventTrigger.gameStart)
         return True
     def turnStart(self) -> bool:
         self.__round += 1
         logger.info(f"第{self.__round}回合")
-        self.setNow(EventTrigger.roundStart)
-        self.newMoveOrder()
-        logger.debug(f"原始移动顺序为{[role.name() for role in self.data().moveOrder()]}")
+        data = self.data()
+        data.setNow(EventTrigger.roundStart)
+        data.newMoveOrder()
+        logger.debug(f"原始移动顺序为{[role.name() for role in data.moveOrder()]}")
         self.checkTrigger2()
         return True
     def moveBefore(self) -> bool:
@@ -1129,24 +1212,24 @@ class EventProcessor:
         Returns:
             bool: 是否执行成功，如果执行失败，则代表当前处理角色在终点
         """
-        self.setNow(EventTrigger.moveBefore)
+        self.data().setNow(EventTrigger.moveBefore)
         data = self.data()
         role = data.nextMoveRole()
+        data.setNowRole(role)
         if role.isInEndpoint(data.length()):
             return False
-        data.setNowRole(role)
         data.setMoveNum(role.generatedMoveNum())
         logger.debug(f"{role.name()}准备移动{data.moveNum()}格")
         self.checkTrigger()
         return True
     def move(self) -> bool:
-        self.setNow(EventTrigger.moveBegin)
+        self.data().setNow(EventTrigger.moveBegin)
         data = self.data()
         role = data.nowRole2()
-        role.move(data.moveNum())
+        role.move(data.moveNum(), data.roles())
         return True
     def moveEnd(self) -> MoveEndResult:
-        self.setNow(EventTrigger.moveEnd)
+        self.data().setNow(EventTrigger.moveEnd)
         data = self.data()
         role = data.nowRole2()
         data.addMovedRole(role)
@@ -1156,20 +1239,69 @@ class EventProcessor:
             self.data().resetNowRole()
             if data.isEnd():
                 return MoveEndResult.game_end
-            elif data.allMoved():
+            elif data.isAllMoved():
                 return MoveEndResult.all_moved
             else:
                 return MoveEndResult.not_all_moved
         else:
-            if data.allMoved():
+            if data.isAllMoved():
                 return MoveEndResult.all_moved
             else:
                 return MoveEndResult.not_all_moved
     def gameEnd(self) -> bool:
-        self.setNow(EventTrigger.gameEnd)
+        self.data().setNow(EventTrigger.gameEnd)
         self.data().resetNowRole()
         return True
-    
+
+# 运行
+    def debugRun(self) -> dict[Role, int]:
+        """
+        调试模拟运行
+
+        Returns:
+            dict[Role]: 排名结果
+        """
+        self.gameStart()
+        input("回车以继续")
+        while(True):
+            self.turnStart()
+            input("回车以继续")
+            while(True):
+                if not self.moveBefore():
+                    data = self.data()
+                    role = data.nowRole2()
+                    logger.debug(f"角色{role}在终点，跳过角色")
+                    data.addMovedRole(role)
+                    if data.isAllMoved():
+                        data.clearMovedList()
+                    continue
+                else:
+                    input("回车以继续")
+                    self.move()
+                    input("回车以继续")
+                    match self.moveEnd():
+                        case MoveEndResult.not_all_moved:
+                            continue
+                        case MoveEndResult.all_moved:
+                            data = self.data()
+                            roleList = data.roles()
+                            
+                            debugOutput = data.getAllLinkState()
+                                
+                            logger.debug(f"场上情况如下：{debugOutput}")
+                            data.clearMovedList()
+                            input("回车以继续")
+                            break
+                        case MoveEndResult.game_end:
+                            input("回车以继续")
+                            self.gameEnd()
+                            result = self.data().rankingOfRoles()
+                            d_output = self.resultToNameDict(result)
+                            logger.debug(f"{d_output}")
+                            return result
+                        case _:
+                            logger.exception("moveEnd函数返回值错误：")
+                            raise TypeError("moveEnd函数返回值错误")
     def run(self) -> dict[Role, int]:
         """
         模拟运行
@@ -1182,7 +1314,12 @@ class EventProcessor:
             self.turnStart()
             while(True):
                 if not self.moveBefore():
-                    logger.debug(f"角色{self.data().nowRole2()}在终点，跳过角色")
+                    data = self.data()
+                    role = data.nowRole2()
+                    logger.debug(f"角色{role}在终点，跳过角色")
+                    data.addMovedRole(role)
+                    if data.isAllMoved():
+                        data.clearMovedList()
                     continue
                 else:
                     self.move()
@@ -1199,6 +1336,16 @@ class EventProcessor:
                             logger.exception("moveEnd函数返回值错误：")
                             raise TypeError("moveEnd函数返回值错误")
     def runs(self, times: int) -> dict[str, dict[int, int]]:
+        """
+        多次模拟运行
+
+        Args:
+            times (int): 运行次数
+
+        Returns:
+            dict[str, dict[int, int]]: 运行结果
+        """
+        startTime = time.time()
         final_return: dict[str, dict[int, int]] = {}
         for i in range(times):
             result = self.run()
@@ -1209,7 +1356,10 @@ class EventProcessor:
                 ranking_num = new_result_dict[name]
                 
                 final_return[name][ranking_num] = final_return[name].get(ranking_num, 0) + 1
-                
+
+        endTime = time.time()
+        # logger.info(f"模拟次数：{times}\n模拟时间：{endTime - startTime}秒")
+        print(f"模拟次数：{times}\n模拟时间：{endTime - startTime}秒")
         return final_return
 
 # 示例
@@ -1235,7 +1385,7 @@ class EventProcessor:
         
         role.appSkill(skill1)
 
-    def addExampleRole1(self):
+    def addPhoebe(self):
         self.addRole(Role("菲比")).appSkill(
             Skill(
                 EventTrigger.moveBefore,
@@ -1247,23 +1397,27 @@ class EventProcessor:
             )
         )
     
-    def addExampleRole2(self):
+    def addZaNi(self):
         role = self.addRole(Role("赞妮"))
         role.setMoveFunc(lambda: random.choice([1, 3]))
         role.appSkill(
             Skill(
                 EventTrigger.moveBefore,
                 lambda data: role.isStack() and random.random() < 0.4,
-                lambda data: role.addTempSkillOfRound2(2)
+                lambda data: role.addTempSkillOfRound2(2),
+                None,
+                "赞妮的技能",
+                ""
             )
         )
     
-    def addExampleRole3(self):
+    def addBrant(self):
+        # 由于是进行深拷贝再模拟，因此不要直接写is role
         role = self.addRole(Role("布兰特"))
         role.appSkill(
             Skill(
                 EventTrigger.moveBefore,
-                lambda data: data.moveOrder()[0] is role,
+                lambda data: data.moveOrder()[0] is data.nowRole2(),
                 2,
                 None,
                 "布兰特的技能",
@@ -1271,12 +1425,12 @@ class EventProcessor:
             )
         )
     
-    def addExampleRole4(self):
+    def addRoccia(self):
         role = self.addRole(Role("洛可可"))
         role.appSkill(
             Skill(
                 EventTrigger.moveBefore,
-                lambda data: data.moveOrder()[-1] is role,
+                lambda data: data.moveOrder()[-1] is data.nowRole2(),
                 2,
                 None,
                 "洛可可的技能",
@@ -1285,6 +1439,12 @@ class EventProcessor:
         )
 
     def exampleOutput(self, result: dict[str, dict[int, str]]):
+        """
+        在终端以表格输出结果
+
+        Args:
+            result (dict[str, dict[int, str]]): runs结果
+        """
         from prettytable import PrettyTable
 
         data_long = len(result.values())
@@ -1305,19 +1465,22 @@ class EventProcessor:
         table.field_names = arr.pop(0)
         table.add_rows(arr)
         print(table)
-        
 
-    def __init__(self, init_data: EventData | None = None) -> None:
+
+    def __init__(self, length: int) -> None:
         """
         事件类
         
-        初始化时可以不写用于初始化的数据，但一旦想调用成员方法，必须得设置初始化数据
+        常用函数有：
+            run: 进行一次运行
+            runs: 进行多次运行
 
         Args:
-            init_data (Data2 | None, optional): 游戏初始化用数据. Defaults to None.
+            length (int): 赛道长度
         """
-        self.__now: EventTrigger = EventTrigger.unStart
-        self.__init_data: EventData | None = init_data
+        # self.__now: EventTrigger = EventTrigger.unStart
+        self.__init_data: EventData = EventData()
+        self.__init_data.setLength(length)
         self.__data: EventData = EventData()
-        self.gameStartInit()
+        # self.gameStartInit()
         self.__round = 0
