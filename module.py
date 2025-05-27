@@ -24,18 +24,26 @@ class EventTrigger(Enum):
     Args:
         Enum (enum): 枚举类
     """
-    unStart =       0
-    gameStart =     0b1
-    roundStart =    0b1 << 1
-    moveBefore =    0b1 << 2
-    moveBegin =     0b1 << 3
-    moveEnd =       0b1 << 4
-    gameEnd =       0b1 << 5
+    unstart =       0
+    game_start =     0b1
+    round_start =    0b1 << 1
+    move_before =    0b1 << 2
+    move_begin =     0b1 << 3
+    move_end =       0b1 << 4
+    game_end =       0b1 << 5
 
-class MoveEndResult(Enum):
-    not_all_moved = 0
-    all_moved = 0b1
-    game_end = 0b1 << 1
+class MoveResult(Enum):
+    """
+    涵盖了所有移动结果的枚举
+
+    Args:
+        Enum (enum): 枚举类
+    """
+    undefine =      0
+    can_next_step = 0b1
+    not_all_moved = 0b1 << 1
+    all_moved =     0b1 << 2
+    game_end =      0b1 << 3
 
 
 class Skill:
@@ -415,7 +423,7 @@ class Role:
         """
 
         skill2 = Skill(
-            EventTrigger.roundStart, 
+            EventTrigger.round_start, 
             True, 
             None, 
             self, 
@@ -455,7 +463,7 @@ class Role:
         """
         self.addTempSkillOfRound(
             Skill(
-                EventTrigger.roundStart,
+                EventTrigger.round_start,
                 True,
                 add_move_num,
                 None,
@@ -789,17 +797,10 @@ class RoleData:
 
 class EventData(RoleData):
     """
-    Args:
-        _roles (list[Role]): 剩余角色列表
-        __moveOrder (list[Role]): 移动顺序
-        __movedRoles (list[Role]): 移动过的角色
-        __moveNum (int): 移动格数
-        __nowRole (Role | None): 当前处理角色。默认为None
-        __length (int): 赛道长度。默认为None
-        __rankingOfRoles (dict[Role, int]): 战斗排名
+    事件数据，包含对局情况和角色相关
     """
     
-# 当前处理角色
+# 当前处理角色      # TODO 等待移出
     def resetNowRole(self):
         """
         将当前处理角色重置为None
@@ -878,7 +879,26 @@ class EventData(RoleData):
         Args:
             tri (EventEnum): 时间时机
         """
+        logger.debug(f"--{trigger.name}--")
         self.__now = trigger
+    def addRound(self):
+        """
+        回合数加一
+        """
+        self.__round += 1
+    def round(self) -> int:
+        """
+        获取当前回合数
+
+        Returns:
+            int: 回合数
+        """
+        return self.__round
+    def resetRound(self):
+        """
+        将回合数归零
+        """
+        self.__round = 0
 
 # 排名
     def setRoleInEndpoint(self, role: Role):
@@ -915,14 +935,19 @@ class EventData(RoleData):
             list[Role]: 移动顺序
         """
         return self.__moveOrder
-    def nextMoveRole(self) -> Role:
+    def nextMoveRole(self, length: int) -> Role | None:
         """
         返回下一个移动角色
 
         Returns:
-            Role: 下一个移动角色
+            Role | None: 下一个移动角色，或为无目标、所有角色都移动过
         """
-        return self.moveOrder()[len(self.movedRoles())]
+        # role = self.moveOrder()[len(self.movedRoles())]
+        for role in (self.moveOrder()[len(self.movedRoles()):]):
+            if not role.isInEndpoint(length):
+                return role
+        else:
+            return
     def newMoveOrder(self):
         """
         快速生成一个随机移动顺序，存于自身
@@ -1059,6 +1084,16 @@ class EventData(RoleData):
     def deepcopy(self) -> "EventData":
         return copy.deepcopy(self)
 
+# 结果
+    def resultToNameDict(self) -> dict[str, int]:
+        """
+        将run的运行结果转为角色名: 排名
+
+        Returns:
+            dict[str, int]: 字典，key为角色名，int为排名
+        """
+        result = self.rankingOfRoles()
+        return {role.name(): num for role, num in result.items()}
 
     def __init__(self):
         """
@@ -1071,7 +1106,8 @@ class EventData(RoleData):
         self.__nowRole: Role | None = None      # 当前处理角色
         self.__length: int | None = None        # 赛道长度
         self.__rankingOfRoles: dict[Role, int] = {}
-        self.__now = EventTrigger.unStart       #当前时机
+        self.__now = EventTrigger.unstart       #当前时机
+        self.__round = 0
 
 class EventProcessor:
     """
@@ -1130,20 +1166,8 @@ class EventProcessor:
         logger.debug("进行数据初始化")
         init_data = self.initData2()
         self.__data = init_data.deepcopy()
-        self.__round = 0
 
 # 结果
-    def resultToNameDict(self, result: dict[Role, int]) -> dict[str, int]:
-        """
-        将run运行得出的数据转为可阅读类型
-
-        Args:
-            result (dict[Role, int]): run函数运行结果
-
-        Returns:
-            dict[str, int]: 字典，key为角色名，int为排名
-        """
-        return {role.name(): num for role, num in result.items()}
     def resultsToProbability(self, result: dict[str, dict[int, int]], times: int) -> dict[str, dict[int, str]]:
         """
         将角色排名次数转换成百分比
@@ -1178,7 +1202,9 @@ class EventProcessor:
             role.tryUseSkills(data.now(), data)
     def checkTrigger2(self):
         """
-        同上，但是这是专门在turnStart时，也就是没有当前处理角色时使用的函数
+        同checkTrigger，但是这是专门在turnStart时，也就是没有当前处理角色时使用的函数
+        
+        此函数不会检查当前处理角色是否为空
 
         Args:
             trigger (EventTrigger): 时机
@@ -1190,151 +1216,130 @@ class EventProcessor:
             role.tryUseSkills2(data.now(), data)
 
 # 主逻辑
-    def gameStart(self) -> bool:
+    def gameStart(self) -> EventData:
+        """
+        进行游戏开始时的操作，包括复制初始数据操作
+
+        Returns:
+            EventData: 事件数据
+        """
+        data = self.data()
         logger.info("游戏开始")
         logger.debug("初始化数据")
         self.gameStartInit()
-        self.data().setNow(EventTrigger.gameStart)
-        return True
-    def turnStart(self) -> bool:
-        self.__round += 1
-        logger.info(f"第{self.__round}回合")
+        data.setNow(EventTrigger.game_start)
+        return data
+    def turnStart(self) -> EventData:
+        """
+        开启一个新的回合，增加回合数，并生成一个新移动顺序，检测所有角色的触发器
+
+        Returns:
+            EventData: 事件数据
+        """
         data = self.data()
-        data.setNow(EventTrigger.roundStart)
+        data.setNow(EventTrigger.round_start)
+        data.clearMovedList()
+        data.addRound()
+        logger.info(f"第{data.round()}回合")
         data.newMoveOrder()
         logger.debug(f"原始移动顺序为{[role.name() for role in data.moveOrder()]}")
         self.checkTrigger2()
-        return True
-    def moveBefore(self) -> bool:
+        return data
+    def moveBefore(self) -> MoveResult:
         """
         准备阶段
 
         Returns:
-            bool: 是否执行成功，如果执行失败，则代表当前处理角色在终点
+            MoveResult: 只会有两个返回值，all_moved和can_next_step
         """
-        self.data().setNow(EventTrigger.moveBefore)
+        self.data().setNow(EventTrigger.move_before)
         data = self.data()
-        role = data.nextMoveRole()
-        data.setNowRole(role)
-        if role.isInEndpoint(data.length()):
-            return False
-        data.setMoveNum(role.generatedMoveNum())
-        logger.debug(f"{role.name()}准备移动{data.moveNum()}格")
-        self.checkTrigger()
-        return True
-    def move(self) -> bool:
-        self.data().setNow(EventTrigger.moveBegin)
+        role = data.nextMoveRole(data.length())
+        if role is None:
+            return MoveResult.all_moved
+        else:
+            data.setNowRole(role)
+            data.setMoveNum(role.generatedMoveNum())
+            logger.debug(f"{role.name()}准备移动{data.moveNum()}格")
+            self.checkTrigger()
+            return MoveResult.can_next_step
+    def moveBegin(self) -> MoveResult:
+        self.data().setNow(EventTrigger.move_begin)
         data = self.data()
         role = data.nowRole2()
         role.move(data.moveNum(), data.roles())
-        return True
-    def moveEnd(self) -> MoveEndResult:
-        self.data().setNow(EventTrigger.moveEnd)
+        return MoveResult.can_next_step
+    def moveEnd(self) -> MoveResult:
+
         data = self.data()
+        data.setNow(EventTrigger.move_end)
         role = data.nowRole2()
         data.addMovedRole(role)
+        logger.debug(f"{role}到达{role.cell()}格")
+        
         if role.isInEndpoint(data.length()):
             data.setRoleInEndpoint(role)
-            logger.debug(f"{role}到达{role.cell()}格")
             self.data().resetNowRole()
             if data.isEnd():
-                return MoveEndResult.game_end
-            elif data.isAllMoved():
-                return MoveEndResult.all_moved
-            else:
-                return MoveEndResult.not_all_moved
+                return MoveResult.game_end
+        if data.isAllMoved():
+            return MoveResult.all_moved
         else:
-            if data.isAllMoved():
-                return MoveEndResult.all_moved
-            else:
-                return MoveEndResult.not_all_moved
-    def gameEnd(self) -> bool:
-        self.data().setNow(EventTrigger.gameEnd)
-        self.data().resetNowRole()
-        return True
-
-# 运行
-    def debugRun(self) -> dict[Role, int]:
+            return MoveResult.not_all_moved
+    def move(self) -> tuple[EventData, MoveResult]:
         """
-        调试模拟运行
+        移动一个角色
 
         Returns:
-            dict[Role]: 排名结果
+            tuple[EventData, MoveEndResult]: 
+                参数1为事件数据。
+                参数2为移动结果，有三种返回值，not_all_moved、all_moved和game_end
         """
-        self.gameStart()
-        input("回车以继续")
-        while(True):
-            self.turnStart()
-            input("回车以继续")
-            while(True):
-                if not self.moveBefore():
-                    data = self.data()
-                    role = data.nowRole2()
-                    logger.debug(f"角色{role}在终点，跳过角色")
-                    data.addMovedRole(role)
-                    if data.isAllMoved():
-                        data.clearMovedList()
-                    continue
-                else:
-                    input("回车以继续")
-                    self.move()
-                    input("回车以继续")
-                    match self.moveEnd():
-                        case MoveEndResult.not_all_moved:
-                            continue
-                        case MoveEndResult.all_moved:
-                            data = self.data()
-                            roleList = data.roles()
-                            
-                            debugOutput = data.getAllLinkState()
-                                
-                            logger.debug(f"场上情况如下：{debugOutput}")
-                            data.clearMovedList()
-                            input("回车以继续")
-                            break
-                        case MoveEndResult.game_end:
-                            input("回车以继续")
-                            self.gameEnd()
-                            result = self.data().rankingOfRoles()
-                            d_output = self.resultToNameDict(result)
-                            logger.debug(f"{d_output}")
-                            return result
-                        case _:
-                            logger.exception("moveEnd函数返回值错误：")
-                            raise TypeError("moveEnd函数返回值错误")
-    def run(self) -> dict[Role, int]:
+        match self.moveBefore():
+            case MoveResult.all_moved:
+                move_result = MoveResult.all_moved
+            case MoveResult.can_next_step:
+                self.moveBegin()
+                move_result = self.moveEnd()
+            case _:
+                logger.exception("未定义的结果")
+                raise ValueError("函数返回结果错误，请查看情况")
+        return self.data(), move_result
+    def gameEnd(self) -> EventData:
+        """
+        结束游戏
+
+        Returns:
+            EventData: 事件数据
+        """
+        data = self.data()
+        data.setNow(EventTrigger.game_end)
+        data.resetNowRole()
+        return data
+
+# 运行      # TODO 返回值有待改进
+    def run(self) -> EventData:
         """
         模拟运行
 
         Returns:
-            dict[Role]: 排名结果
+            EventData: 事件数据
         """
         self.gameStart()
+        
         while(True):
             self.turnStart()
             while(True):
-                if not self.moveBefore():
-                    data = self.data()
-                    role = data.nowRole2()
-                    logger.debug(f"角色{role}在终点，跳过角色")
-                    data.addMovedRole(role)
-                    if data.isAllMoved():
-                        data.clearMovedList()
-                    continue
-                else:
-                    self.move()
-                    match self.moveEnd():
-                        case MoveEndResult.not_all_moved:
-                            continue
-                        case MoveEndResult.all_moved:
-                            self.data().clearMovedList()
-                            break
-                        case MoveEndResult.game_end:
-                            self.gameEnd()
-                            return self.data().rankingOfRoles()
-                        case _:
-                            logger.exception("moveEnd函数返回值错误：")
-                            raise TypeError("moveEnd函数返回值错误")
+                move_result = self.move()[1]
+                match(move_result):
+                    case MoveResult.not_all_moved:
+                        continue
+                    case MoveResult.all_moved:
+                        break
+                    case MoveResult.game_end:
+                        self.gameEnd()
+                        return self.data()
+                        # return self.data().rankingOfRoles()
     def runs(self, times: int) -> dict[str, dict[int, int]]:
         """
         多次模拟运行
@@ -1348,8 +1353,7 @@ class EventProcessor:
         startTime = time.time()
         final_return: dict[str, dict[int, int]] = {}
         for i in range(times):
-            result = self.run()
-            new_result_dict = self.resultToNameDict(result)
+            new_result_dict = self.run().resultToNameDict()
             
             for name in new_result_dict:
                 final_return.setdefault(name, {})
@@ -1367,7 +1371,7 @@ class EventProcessor:
         role = self.addRole(Role("测试角色A")).setMoveFunc(lambda: 0)
         
         skill2 = Skill(
-            EventTrigger.moveBefore,
+            EventTrigger.move_before,
             True,
             2,
             None,
@@ -1375,7 +1379,7 @@ class EventProcessor:
         )
         
         skill1 = Skill(
-            EventTrigger.moveBefore,
+            EventTrigger.move_before,
             True,
             lambda data: role.addTempSkillOfRound(skill2),
             None,
@@ -1388,7 +1392,7 @@ class EventProcessor:
     def addPhoebe(self):
         self.addRole(Role("菲比")).appSkill(
             Skill(
-                EventTrigger.moveBefore,
+                EventTrigger.move_before,
                 0.5,
                 1,
                 None,
@@ -1402,7 +1406,7 @@ class EventProcessor:
         role.setMoveFunc(lambda: random.choice([1, 3]))
         role.appSkill(
             Skill(
-                EventTrigger.moveBefore,
+                EventTrigger.move_before,
                 lambda data: role.isStack() and random.random() < 0.4,
                 lambda data: role.addTempSkillOfRound2(2),
                 None,
@@ -1416,7 +1420,7 @@ class EventProcessor:
         role = self.addRole(Role("布兰特"))
         role.appSkill(
             Skill(
-                EventTrigger.moveBefore,
+                EventTrigger.move_before,
                 lambda data: data.moveOrder()[0] is data.nowRole2(),
                 2,
                 None,
@@ -1429,7 +1433,7 @@ class EventProcessor:
         role = self.addRole(Role("洛可可"))
         role.appSkill(
             Skill(
-                EventTrigger.moveBefore,
+                EventTrigger.move_before,
                 lambda data: data.moveOrder()[-1] is data.nowRole2(),
                 2,
                 None,
@@ -1483,4 +1487,4 @@ class EventProcessor:
         self.__init_data.setLength(length)
         self.__data: EventData = EventData()
         # self.gameStartInit()
-        self.__round = 0
+        # self.__round = 0
