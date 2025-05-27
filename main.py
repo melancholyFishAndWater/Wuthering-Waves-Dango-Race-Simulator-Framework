@@ -4,10 +4,10 @@ from module import Role, Skill, EventProcessor, EventData, EventTrigger
 
 if __name__ == "__main__":
     
-    times = 10
+    # times = 10
     # times = 50
     # times = 1000
-    # times = 10000
+    times = 10000
     
     ep = EventProcessor(23)
     ep.addPhoebe()
