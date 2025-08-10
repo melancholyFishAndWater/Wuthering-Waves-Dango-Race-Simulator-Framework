@@ -1,11 +1,15 @@
 这个代码也是写了好久好久，就上传到github上留念一下，纪念自己的热血吧
 
-具体程序逻辑请参考下图
+具体事件流程请参考下图
 
-![](逻辑流程图.png)
+![](事件链.png)
 
-使用方法请参考module.py文件的EventProcessor类，里面有例子
+使用流程：导入 api 里的 game 变量， init() 初始化以获得初始化结束的事件 event
 
-如果你只需要结果，则只需要实例化EventProcessor，然后调用内置的添加角色函数，即可获得结果
+使用 game.addCharacter 函数添加角色进入游戏，然后 event.start() 开始模拟， event.getResult() 获取排名: 名字的字典
 
-目前来说，如果你需要分段运行，则需要参照EventProcessor类中run函数里的流程，依次调用gameStart、turnStart、move、gameEnd流程进行，然后在中间自主加入读取EventData以进行其他操作
+代码编写的使用方法请参考 game.py文件的快速启动函数 faseStart
+
+如果你想添加技能，请参考 skill.py 的初始化
+
+在 game.importStandard 函数里有所有角色，名字后面带注释tested的即为测试过

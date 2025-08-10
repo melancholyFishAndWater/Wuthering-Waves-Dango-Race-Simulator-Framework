@@ -1,22 +1,55 @@
-from globals import *
-from module import Role, Skill, EventProcessor, EventData, EventTrigger
+"""
+游戏规则
 
+共同从起点出发，赛道有24个格子，每个团子抛骰子决定本次移动步数，骰子有1、2、3三个牌面，
+代表团子的本次行进步数，理论上出现每个骰面的概率相等，团子在行动时，后方团子的目标移动格子若有其他团子，
+则会叠在前方该团子的头上，当下方团子移动时，会带动上方团子一起移动，团子没有堆叠上限，处于堆叠状态的团子越往上排名越靠前。
+堆叠：处于同一格...？
+
+A组
+    1. 今汐，其他角色移动结束时？所在格？发生堆叠时，如果头顶堆叠其他团子，有40%的概率移动到所有团子的最上方；
+
+    2. 长离，回合结束时，如果下方堆叠其他团子，下一个回合有65%的概率最后一个行动；
+
+    3. 卡卡罗，开始移动时，如果在最后一名，额外前进3格；
+
+    4. 守岸人，骰子只会掷出2或3；
+
+    5. 椿，自身行动时50%概率触发：当前格子除了自身外每有1个团子，使自身行动格数+1，且不会带其他团子一起移动；
+
+    6. 珂莱塔，28%概率以骰子的步数前进2次；
+
+B组
+7. 洛可可，如果是最后一个移动，额外前进2格； 
+
+8. 布兰特，如果是第一个移动，额外前进2格； 
+
+9. 坎特蕾拉，移动过程中首次遇到团子时，会和此格子所有团子堆叠，在本回合一起移动。每场比赛最多触发1次； 
+
+10. 赞妮，骰子只会掷出1或3。开始移动时，如果处于堆叠状态下回合有40%概率额外前进2格； 
+    实际上是算上回合的事情，你会发现自己一个人，然后显示发动了技能
+
+11. 卡提希娅，自身移动结束后，若处于最后一名，本场比赛剩余回合都会60%概率额外前进2格。每场比赛最多触发1次； 
+
+12. 菲比，50%概率额外前进1格； 
+"""
+
+from __init__ import *
 
 if __name__ == "__main__":
     
     # times = 10
     # times = 50
     # times = 1000
-    times = 10000
+    # times = 10000
     
-    ep = EventProcessor(23)
-    ep.addPhoebe()
-    ep.addZaNi()
-    ep.addBrant()
-    ep.addRoccia()
-    
-    # a = ep.debugRun()
-    # print(ep.resultToNameDict(ep.run()))
-    a = ep.runs(times)
-    r = ep.resultsToProbability(a, times)
-    ep.exampleOutput(r)
+    # r = game.faseStart()
+    # print(r)
+
+    evt = game.init()
+    game.addCharacter("洛可可")
+    game.addCharacter("布兰特")
+    game.addCharacter("菲比")
+    game.addCharacter("赞妮")
+    game.start()
+    print(evt.getResult())
